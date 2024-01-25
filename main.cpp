@@ -1,129 +1,158 @@
 #include <flecs.h>
 
+#include <glm/ext/matrix_clip_space.hpp> // perspective
+#include <glm/ext/matrix_transform.hpp>  // translate, rotate
+#include <glm/glm.hpp>
+#include <glm/vec3.hpp>
+
 #include <print>
-#include <variant>
 #include <string>
+#include <variant>
+#include <vector>
 
-struct Child {};
+struct Child
+{};
 
-struct Dirty {
-    bool value;
+struct Position
+{
+    glm::vec3 value;
 };
 
+struct StructuralElement
+{};
 
-struct StructuralElement {};
+struct Node : StructuralElement
+{};
 
-struct Point : StructuralElement {
-    double x;
-    double y;
+struct NodeOnLine : Node
+{
+    float t;
 };
 
-struct PointBetweenTwoPoints : StructuralElement {};
-
-struct PointOnLine : Point {
-    double t;
+struct Line : StructuralElement
+{
+    glm::vec3 from;
+    glm::vec3 to;
 };
 
-struct Line : StructuralElement {
-    double x0;
-    double y0;
-
-    double x1;
-    double y2;
-};
-
-struct Surface {
+struct Surface : StructuralElement
+{
     double area;
 };
 
-int main() {
+struct NodalSupportType
+{};
+
+struct Member
+{};
+
+struct OnLine
+{};
+
+struct HasHinge
+{};
+
+struct HasSupport
+{};
+
+struct HingeType
+{};
+
+struct SupportType
+{};
+
+struct Lol
+{
+    float a;
+};
+
+int
+main()
+{
     auto world = flecs::world{};
 
     world.import <flecs::units>();
     world.import <flecs::monitor>(); // Collect statistics periodically
 
-    const flecs::entity &structuralElementComponent = world.component<StructuralElement>();
-    const flecs::entity &childComponent = world.component<Child>().add(flecs::Traversable);
-    const flecs::entity &pointComponent = world.component<Point>().is_a<StructuralElement>();
-    const flecs::entity &lineComponent = world.component<Line>().is_a<StructuralElement>();
-    const flecs::entity &pointBetweenTwoPointsComponent = world.component<PointBetweenTwoPoints>().is_a<StructuralElement>();
-    const flecs::entity &pointOnLineComponent = world.component<PointOnLine>().is_a<StructuralElement>();
+    const flecs::entity& structuralElementComponent = world.component<StructuralElement>();
+    const flecs::entity& childComponent = world.component<Child>().add(flecs::Traversable);
+    const flecs::entity& pointComponent = world.component<Node>().is_a<StructuralElement>();
+    const flecs::entity& lineComponent = world.component<Line>().is_a<StructuralElement>();
+    world.component<Position>();
+    const flecs::entity& surfaceComponent = world.component<Surface>().is_a<StructuralElement>();
+    const flecs::entity& pointOnLineComponent = world.component<NodeOnLine>().is_a<StructuralElement>();
 
-    //flecs::query<> q = world.query_builder().term<StructuralElement>().cascade(childComponent).self().term<Point>().inout(flecs::InOut).or_().term<Line>().build();
+    const flecs::entity& hingeTypeComponent = world.component<HingeType>();
 
-    //const flecs::entity &p1 = world.entity("P1").add<StructuralElement>().set<Point>({.x = 0.0, .y = 0.0}).set<Dirty>({ .value = true });
-    //const flecs::entity &p2 = world.entity("P2").add<StructuralElement>().set<Point>({.x = 10.0, .y = 0.0}).set<Dirty>({.value = true});
+    const flecs::entity& hasHingeComponent = world.component<HasHinge>().add(flecs::Exclusive);
+    const flecs::entity& hasSupportComponent = world.component<HasSupport>().add(flecs::Exclusive);
+    const flecs::entity& memberComponent = world.component<Member>();
 
-    //const flecs::entity &line1 = world.entity("L1").add<StructuralElement>().set<Line>({}).add<Child>(p1).add<Child>(p2).set<Dirty>({.value = true});
+    auto rebuildStructure = world.system("RebuildStructure").kind(flecs::OnUpdate).expr("StructuralElement(self|up(Child))").each([&](const flecs::entity& entity) {
+        // std::println("Name {}", entity.name().c_str());
 
-    //const flecs::entity &p3 =
-    //    world.entity("P3").add<StructuralElement>().set<Point>({.x = 0.0, .y = 0.0}).set<PointOnLine>({.t = 0.4}).add<Child>(p1).add<Child>(p2).set<Dirty>({.value = true});
-    //const flecs::entity &p4 = world.entity("P4").add<StructuralElement>().set<Point>({.x = 5.0, .y = 5.0}).set<Dirty>({.value = true});
+        if (entity.has<NodeOnLine>()) {
+            NodeOnLine* nodeOnLine = entity.get_mut<NodeOnLine>();
 
-    //const flecs::entity &line2 = world.entity("L2").add<StructuralElement>().add<Line>().add<Child>(p3).add<Child>(p4).set<Dirty>({.value = true});
+            const Line* line = entity.target<Child>(0).get<Line>();
 
-    const flecs::system calculatePointsPositionsSystem =
-        world.system("CalculatePointPositions")
-            .term<StructuralElement>()
-            .cascade(childComponent)
-            .self()
-            .term<Point>()
-            .inout(flecs::InOut)
-            .or_()
-            .term<Line>()
-            .term<Dirty>()
-            .each([&](flecs::iter &it, size_t index) {
-                flecs::entity entity = it.entity(index);
-                flecs::id term_id = it.id(2);        
+            if (line) {
+                glm::vec3 v = glm::normalize(line->from - line->to);
 
-                Dirty *dirty = entity.get_mut<Dirty>();
-                dirty->value = false;
+                glm::vec3 position = line->from + nodeOnLine->t * v;
 
-                if (term_id == world.id<Point>()) {
-                    //std::println("Dirty {} ", dirty->value);
-                    Point *v = entity.get_mut<Point>();
+                // std::println("Node on line position {}", position.x);
+            }
+        }
 
-                    const PointOnLine *onLine = entity.get<PointOnLine>();
-                    if (onLine) {
-                        const Point *fromPoint = entity.target(childComponent, 0).get<Point>();
-                        const Point *toPoint = entity.target(childComponent, 1).get<Point>();
+        if (entity.has<Line>()) {
+            Line* line = entity.get_mut<Line>();
 
-                        auto newX = fromPoint->x * onLine->t + toPoint->x * (1.0 - onLine->t);
-                        auto newY = fromPoint->y * onLine->t + toPoint->y * (1.0 - onLine->t);
+            const Position* fromPosition = entity.target<Child>(0).get<Position>();
+            const Position* toPosition = entity.target<Child>(1).get<Position>();
 
-                        if (newX != v->x || newY != v->y) {
-                            *v = {.x = newX, .y = newY};
-                            dirty->value = true;
-                        }
-                    }
+            if (fromPosition && toPosition) {
+                line->from = fromPosition->value;
+                line->to = toPosition->value;
 
-                    /*std::println("Point {0} | X: {1:.3f} Y: {2:.3f}", entity.name().c_str(), v->x, v->y);*/
-                }
-                if (term_id == world.id<Line>()) {
-                    // std::cout << "is a line " << entity.name() << std::endl;
+                // std::println("Line from {} to {}", line->from, line->to);
+            }
+        }
 
-                    flecs::entity from = entity.target(childComponent, 0);
-                    flecs::entity to = entity.target(childComponent, 1);
-                    if (from && to) {
-                        auto fromPoint = from.get<Point>();
-                        auto toPoint = to.get<Point>();
-                    }
-                }
-            });
-
-    world.system<const Point, const Dirty>("PrintPoints").each([](const Point& p, const Dirty& dirty) {
-        if (dirty.value) {
-            std::println("Point X: {0:.3f} Y: {1:.3f}", p.x, p.y);
+        if (entity.has<Surface>()) {
         }
     });
+    flecs::query<const Node, const Position> collectNodes = world.query<const Node, const Position>();
 
-    for (int i = 0; i < 100000; i++) {
-        const flecs::entity &p = world.entity().add<StructuralElement>().set<Point>({.x = 0.0, .y = 0.0}).set<Dirty>({.value = true});
-    }
+    const flecs::entity& p1 = world.entity("P1").add<Node>().set<Position>({ .value = glm::vec3(0.0) });
+    const flecs::entity& p2 = world.entity("P2").add<Node>().set<Position>({ .value = glm::vec3(1.0, 0.0, 0.0) });
+
+    const flecs::entity& line1 = world.entity("L1").add<StructuralElement>().set<Line>({}).add<Child>(p1).add<Child>(p2);
+
+    const flecs::entity& p3 = world.entity("P3").set<NodeOnLine>({ .t = 0.4 }).add<Child>(p1).add<Child>(p2);
+    const flecs::entity& p4 = world.entity("P4").add<Node>().set<Position>({ .value = glm::vec3(5.0, 5.0, 0.0) });
+
+    const flecs::entity& line2 = world.entity("L2").add<Line>().add<Child>(p3).add<Child>(p4);
 
     world.progress();
-    world.progress();
-    world.progress();
 
-    return world.app().enable_rest().run();
+    std::vector<glm::vec3> nodes{};
+    collectNodes.iter([&](const flecs::iter& it, const Node* node, const Position* position) {
+        std::println("TABLE");
+        for (auto i : it) {
+            std::println("{} {} {}", position[i].value.x, position[i].value.y, position[i].value.z);
+             nodes.push_back(position[i].value);
+        }
+    });
+    // world.system<const Position, const Dirty>("PrintPoints").each([](const Position &p, const Dirty &dirty) {
+    //     if (dirty.value) {
+    //         std::println("Point X: {0:.3f} Y: {1:.3f}", p.x, p.y);
+    //     }
+    // });
+
+    // for (int i = 0; i < 100000; i++) {
+    //     const flecs::entity &p = world.entity().add<StructuralElement>().set<Point>({.x = 0.0, .y = 0.0});
+    // }
+
+    return 0;
 }
